@@ -1,0 +1,38 @@
+name: upload-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "테스트 영상 제목"
+        required: false
+        default: "[테스트] 업로드 연결 확인 (비공개)"
+
+permissions:
+  contents: read
+
+jobs:
+  upload-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg and Korean font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk > /dev/null
+      - name: Make 10s vertical test clip
+        run: |
+          FONT=$(fc-list :lang=ko file | head -n1 | cut -d: -f1)
+          ffmpeg -hide_banner -loglevel error -f lavfi -i color=c=0x8B0000:s=1080x1920:d=10 \
+            -f lavfi -i anullsrc=r=44100:cl=stereo -shortest \
+            -vf "drawtext=fontfile=${FONT}:text='구국열사':fontsize=140:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-120,drawtext=fontfile=${FONT}:text='업로드 연결 테스트':fontsize=70:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2+80" \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -t 10 test.mp4
+          ls -la test.mp4
+      - name: Upload to YouTube as private
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          VIDEO_TITLE: ${{ inputs.title }}
+        run: python3 scripts/youtube_upload.py test.mp4
