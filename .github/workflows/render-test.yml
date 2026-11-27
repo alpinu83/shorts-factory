@@ -1,0 +1,56 @@
+name: render-test
+
+# 자동 제작기 시험: 고정된 시험 대본으로 쇼츠를 만들어 비공개 업로드 (CEO Hub 연결 없이)
+on:
+  workflow_dispatch:
+    inputs:
+      voice:
+        description: "음성 (ko-KR-InJoonNeural 남성 / ko-KR-SunHiNeural 여성 / ko-KR-HyunsuMultilingualNeural 남성2)"
+        required: false
+        default: "ko-KR-InJoonNeural"
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ffmpeg, Korean font, TTS
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk > /dev/null
+          pip install -q edge-tts gTTS
+      - name: Write sample script
+        run: |
+          cat > jobs.json <<'JSON'
+          [{"id":"render-test","script":{"title":"[시험] 구국열사 쇼츠 제작기 점검","scenes":[
+            {"text":"이 영상은 구국열사 채널의 자동 제작 시험입니다.","keywords":"parliament building"},
+            {"text":"뉴스를 고르면 팀이 대본을 쓰고, 대표님이 결재합니다.","keywords":"newspaper"},
+            {"text":"승인된 대본은 음성과 자막을 입혀 자동으로 만들어집니다.","keywords":"city night"},
+            {"text":"완성된 영상은 비공개로 올라가고, 확인 후 공개합니다.","keywords":"smartphone"},
+            {"text":"화면, 자막, 목소리를 확인해 주세요.","keywords":"crowd"}
+          ],"sources":[],"hashtags":["#시험"]}}]
+          JSON
+      - name: Render and upload (private)
+        env:
+          TTS_VOICE: ${{ inputs.voice }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          SHORTS_HOOK_TOKEN: ""
+        run: python3 scripts/make_short.py jobs.json
+      - name: Keep a preview frame
+        if: always()
+        run: |
+          f=$(ls short_*.mp4 2>/dev/null | head -n1); [ -n "$f" ] && ffmpeg -y -loglevel error -ss 3 -i "$f" -frames:v 1 -vf scale=540:-1 preview.jpg || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview
+          path: preview.jpg
+          if-no-files-found: ignore
+          retention-days: 3

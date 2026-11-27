@@ -1,0 +1,57 @@
+name: make-shorts
+
+# CEO Hub에서 결재 승인된 대본을 가져와 쇼츠를 만들고 구국열사 채널에 비공개 업로드
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: make-shorts
+  cancel-in-progress: false
+
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HUB_URL: https://ai-ceo-hub.onrender.com
+      SHORTS_HOOK_TOKEN: ${{ secrets.SHORTS_HOOK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Claim approved scripts from CEO Hub
+        id: claim
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          token = os.environ.get("SHORTS_HOOK_TOKEN", "").strip()
+          out = open(os.environ["GITHUB_OUTPUT"], "a")
+          if not token:
+              print("SHORTS_HOOK_TOKEN 없음 → 건너뜀"); out.write("has_jobs=false\n"); raise SystemExit(0)
+          req = urllib.request.Request(os.environ["HUB_URL"] + "/api/shorts/hook/claim", data=b"{}", method="POST",
+              headers={"Content-Type": "application/json", "x-shorts-token": token, "User-Agent": "CEO-Shorts/1.0"})
+          try:
+              jobs = json.load(urllib.request.urlopen(req, timeout=120)).get("jobs", [])
+          except Exception as e:
+              print("claim 실패:", type(e).__name__); jobs = []
+          json.dump(jobs, open("jobs.json", "w", encoding="utf-8"), ensure_ascii=False)
+          print("제작할 대본:", len(jobs), [j["script"]["title"] for j in jobs])
+          out.write(f"has_jobs={'true' if jobs else 'false'}\n")
+          PY
+      - name: Install ffmpeg, Korean font, TTS
+        if: steps.claim.outputs.has_jobs == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk > /dev/null
+          pip install -q edge-tts gTTS
+      - name: Render and upload (private)
+        if: steps.claim.outputs.has_jobs == 'true'
+        env:
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python3 scripts/make_short.py jobs.json
